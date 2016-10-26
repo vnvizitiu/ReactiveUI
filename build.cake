@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #addin "Cake.FileHelpers"
+#addin "Cake.Coveralls"
 
 //////////////////////////////////////////////////////////////////////
 // TOOLS
@@ -10,6 +11,9 @@
 
 #tool GitVersion.CommandLine
 #tool GitLink
+#tool coveralls.io
+#tool OpenCover
+#tool ReportGenerator
 
 //////////////////////////////////////////////////////////////////////
 // ARGUMENTS
@@ -66,8 +70,10 @@ Information("gitSha={0}", gitSha);
 var semVersion = local ? string.Format("{0}.{1}", version, epoch) : string.Format("{0}.{1}", version, epoch);
 Information("semVersion={0}", semVersion);
 
-// Define directories.
+// Define artifacts.
 var artifactDirectory = "./artifacts/";
+var testCoverageOutputFile = artifactDirectory + "OpenCover.xml";
+
 
 // Define global marcos.
 Action Abort = () => { throw new Exception("a non-recoverable fatal error occurred."); };
@@ -320,16 +326,62 @@ Task("RunUnitTests")
     .IsDependentOn("BuildReactiveUI")
     .Does(() =>
 {
-    XUnit2("./src/ReactiveUI.Tests/bin/Release/Net45/ReactiveUI.Tests_Net45.dll", new XUnit2Settings {
-        OutputDirectory = artifactDirectory,
-        XmlReportV1 = true,
-        NoAppDomain = true
+    Action<ICakeContext> testAction = tool => {
+
+        tool.XUnit2("./src/ReactiveUI.Tests/bin/Release/Net45/ReactiveUI.Tests_Net45.dll", new XUnit2Settings {
+            OutputDirectory = artifactDirectory,
+            XmlReportV1 = true,
+            NoAppDomain = true
+        });
+    };
+
+    OpenCover(testAction,
+        testCoverageOutputFile,
+        new OpenCoverSettings {
+            ReturnTargetCodeOffset = 0,
+            ArgumentCustomization = args => args.Append("-mergeoutput")
+        }
+        .WithFilter("+[*]* -[*.Testing]* -[*.Tests*]* -[Playground*]* -[ReactiveUI.Events]* -[Splat*]*")
+        .ExcludeByAttribute("*.ExcludeFromCodeCoverage*")
+        .ExcludeByFile("*/*Designer.cs;*/*.g.cs;*/*.g.i.cs;*splat/splat*"));
+
+    ReportGenerator(testCoverageOutputFile, artifactDirectory);
+});
+
+
+Task("UploadTestCoverage")
+    .WithCriteria(() => !local)
+    .WithCriteria(() => isMainReactiveUIRepo)
+    .IsDependentOn("RunUnitTests")
+    .Does(() =>
+{
+    // Resolve the API key.
+    var token = EnvironmentVariable("COVERALLS_TOKEN");
+    if (string.IsNullOrEmpty(token))
+    {
+        throw new Exception("The COVERALLS_TOKEN environment variable is not defined.");
+    }
+
+    CoverallsIo(testCoverageOutputFile, new CoverallsIoSettings()
+    {
+        RepoToken = token
     });
 });
 
+
+Task("Clean")
+    .Does (() =>
+{
+    CleanDirectories("./artifacts/**");
+    CleanDirectories("./src/**/bin/**");
+});  
+
+
 Task("Package")
+    .IsDependentOn("Clean")
     .IsDependentOn("PackageEvents")
     .IsDependentOn("PackageReactiveUI")
+    .IsDependentOn("UploadTestCoverage")
     .WithCriteria(() => !isRunningOnUnix)
     .Does (() =>
 {
@@ -345,10 +397,16 @@ Task("Publish")
     .Does (() =>
 {
     // Resolve the API key.
-    var apiKey = EnvironmentVariable("MYGET_API_KEY");
+    var apiKey = EnvironmentVariable("NUGET_APIKEY");
     if (string.IsNullOrEmpty(apiKey))
     {
-        throw new InvalidOperationException("Could not resolve MyGet API key.");
+        throw new Exception("The NUGET_APIKEY environment variable is not defined.");
+    }
+
+    var source = EnvironmentVariable("NUGET_SOURCE");
+    if (string.IsNullOrEmpty(source))
+    {
+        throw new Exception("The NUGET_SOURCE environment variable is not defined.");
     }
 
     // only push whitelisted packages.
@@ -360,13 +418,13 @@ Task("Publish")
 
         // Push the package.
         NuGetPush(packagePath, new NuGetPushSettings {
-            Source = "https://www.myget.org/F/reactiveui/api/v2/package",
+            Source = source,
             ApiKey = apiKey
         });
 
         // Push the symbols
         NuGetPush(symbolsPath, new NuGetPushSettings {
-            Source = "https://www.myget.org/F/reactiveui/api/v2/package",
+            Source = source,
             ApiKey = apiKey
         });
 

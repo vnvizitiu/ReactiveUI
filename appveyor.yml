@@ -7,10 +7,12 @@ branches:
 environment:
   ANDROID_HOME: "C:\\android-sdk-windows"
 
-  MYGET_API_KEY:
+  COVERALLS_TOKEN:
+    secure: NVBDhKKddMUzMSpWusjy5kUhomQYuRORrWtULtVcrgp0W9Ih4dueqQVp1mnkewA8
+
+  NUGET_SOURCE: https://www.myget.org/F/reactiveui/api/v2/package
+  NUGET_APIKEY:
     secure: YP/3KxC2ffsuHNaolPXj66JVGzSjON9FcR2S2OEzn9c6SV14oPzUh1ySyeT+G+aA
-  SONAR_API_KEY:
-    secure: 1WyG/T61dXeEzB33DQE5M7qDMwiJ2tALpRF9jJlK3f6oiv6K+L4gp+q8llYh4951
 
 xamarin:
   email: ghuntley@ghuntley.com
@@ -45,3 +47,7 @@ artifacts:
   - path: '**/bin/*'
   - path: src/ReactiveUI.Events/Events_*.cs
   - path: artifacts/*
+
+
+on_finish:
+  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
